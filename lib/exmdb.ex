@@ -1,6 +1,5 @@
 defmodule Exmdb do
-  alias Exmdb.Env
-  alias Exmdb.Txn
+  alias Exmdb.{Env, Txn, Range}
 
   @spec create(Path.t, Env.env_create_opts) :: {:ok, Env.t} | {:error, :exists}
   defdelegate create(path, opts \\ []), to: Env
@@ -57,7 +56,7 @@ defmodule Exmdb do
     end
   end
 
-  defp transaction(%Env{res: res} = env, fun, opts \\ []) do
+  def transaction(%Env{res: res} = env, fun, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     txn_type = Keyword.get(opts, :type, :rw)
     case txn_begin(res, timeout, txn_type) do
@@ -97,28 +96,38 @@ defmodule Exmdb do
     throw :txn_abort
   end
 
+  def range(%Env{} = env, opts \\ []) do
+    %Range{
+      env: env,
+      from: Keyword.get(opts, :from, :"$exmdb_first"),
+      to: Keyword.get(opts, :to, :"$exmdb_last"),
+      db: Keyword.get(opts, :db)
+    }
+  end
+
   defp txn_begin(txn_res, timeout, :rw) do
     :elmdb.txn_begin(txn_res, timeout)
   end
-  defp txn_begin(txn_res, timeout, :ro) do
-    :elmdb.ro_txn_begin(txn_res, timeout)
+  defp txn_begin(txn_res, _timeout, :ro) do
+    :elmdb.ro_txn_begin(txn_res)
   end
 
   defp txn_commit(txn_res, timeout, :rw) do
     :elmdb.txn_commit(txn_res, timeout)
   end
-  defp txn_commit(txn_res, timeout, :ro) do
-    :elmdb.ro_txn_commit(txn_res, timeout)
+  defp txn_commit(txn_res, _timeout, :ro) do
+    :elmdb.ro_txn_commit(txn_res)
   end
 
   defp txn_abort(txn_res, timeout, :rw) do
     :elmdb.txn_abort(txn_res, timeout)
   end
-  defp txn_abort(txn_res, timeout, :ro) do
-    :elmdb.ro_txn_abort(txn_res, timeout)
+  defp txn_abort(txn_res, _timeout, :ro) do
+    :elmdb.ro_txn_abort(txn_res)
   end
 
-  defp expand_db_spec(dbs, opts) do
+  @doc false
+  def expand_db_spec(dbs, opts) do
     case Keyword.get(opts, :db) do
       nil ->
         if is_map(dbs) do
@@ -147,11 +156,13 @@ defmodule Exmdb do
     }
   end
 
-  defp encode(data, :binary), do: data
-  defp encode(data, :term), do: :erlang.term_to_binary(data)
-  defp encode(data, :ordered_term), do: :sext.encode(data)
+  @doc false
+  def encode(data, :binary), do: data
+  def encode(data, :term), do: :erlang.term_to_binary(data)
+  def encode(data, :ordered_term), do: :sext.encode(data)
 
-  defp decode(data, :binary), do: data
-  defp decode(data, :term), do: :erlang.binary_to_term(data)
-  defp decode(data, :ordered_term), do: :sext.decode(data)
+  @doc false
+  def decode(data, :binary), do: data
+  def decode(data, :term), do: :erlang.binary_to_term(data)
+  def decode(data, :ordered_term), do: :sext.decode(data)
 end
