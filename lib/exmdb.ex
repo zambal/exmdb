@@ -96,14 +96,7 @@ defmodule Exmdb do
     throw :txn_abort
   end
 
-  def range(%Env{} = env, opts \\ []) do
-    %Range{
-      env: env,
-      from: Keyword.get(opts, :from, :"$exmdb_first"),
-      to: Keyword.get(opts, :to, :"$exmdb_last"),
-      db: Keyword.get(opts, :db)
-    }
-  end
+  defdelegate range(env, opts \\ []), to: Range, as: :new
 
   defp txn_begin(txn_res, timeout, :rw) do
     :elmdb.txn_begin(txn_res, timeout)
