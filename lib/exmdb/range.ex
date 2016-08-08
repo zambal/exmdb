@@ -1,19 +1,30 @@
 defmodule Exmdb.Range do
-  defstruct from: :first, to: :last, direction: :fwd, env_res: nil, db_spec: nil, txn: nil
+  defstruct from: :first, to: :last, direction: :fwd, src: nil, db_spec: nil, close_txn?: true
 
-  def new(%Exmdb.Env{} = env, opts \\ []) do
-    {_dbi, key_type, _val_type} = db_spec = Exmdb.expand_db_spec(env.dbs, opts)
+  def new(env_or_txn, opts \\ []) do
+    {_dbi, key_type, _val_type} = db_spec = get_db_spec(env_or_txn, opts)
     from = opts |> Keyword.get(:from, :first) |> validate_range(key_type)
     to = opts |> Keyword.get(:to, :last) |> validate_range(key_type)
     direction = direction(from, to)
+    close_txn = case env_or_txn do
+                  %Exmdb.Env{} -> true
+                  %Exmdb.Txn{} -> false
+                end
     %Exmdb.Range{
-      env_res: env.res,
+      src: env_or_txn,
       from: from,
       to: to,
       direction: direction,
       db_spec: db_spec,
-      txn: Keyword.get(opts, :txn)
+      close_txn?: close_txn
     }
+  end
+
+  defp get_db_spec(%Exmdb.Env{dbs: dbs}, opts) do
+    Exmdb.expand_db_spec(dbs, opts)
+  end
+  defp get_db_spec(%Exmdb.Txn{env: env}, opts) do
+    Exmdb.expand_db_spec(env.dbs, opts)
   end
 
   defp validate_range({:key, key}, key_type) do
@@ -53,18 +64,17 @@ defimpl Enumerable, for: Exmdb.Range do
           end}
   end
 
-  def reduce(%Exmdb.Range{from: from, to: to, direction: dir, db_spec: db_spec} = range, acc, fun) do
-    {dbi, key_type, val_type} = db_spec
-    with {:ok, txn, txn_to_close, txn_type} <- get_txn(range),
-         {:ok, cur} <- cursor_open(txn, dbi, txn_type) do
-      case start(cur, key_type, val_type, txn_type, from, to, dir, acc, fun) do
+  def reduce(%Exmdb.Range{} = range, acc, fun) do
+    with {:ok, range} <- ensure_txn(range),
+         {:ok, cur} <- cursor_open(range) do
+      case start(range, cur, acc, fun) do
         {:cont, acc} ->
-          close(cur, txn_to_close, txn_type)
+          close(range, cur)
           {:done, acc}
         {:suspend, acc} ->
           {:suspended, acc}
         {:halt, acc} ->
-          close(cur, txn_to_close, txn_type)
+          close(range, cur)
           {:halted, acc}
         {:error, {_code, msg}} ->
           raise List.to_string(msg)
@@ -75,12 +85,12 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp start(cur, key_type, val_type, txn_type, from, to, dir, {:cont, acc}, fun) do
-    with {init_op, cont_op, limit} <- prepare(cur, from, to, dir),
-         {:ok, key, val} <- cursor_get(cur, init_op, txn_type) do
-      key = Exmdb.decode(key, key_type)
-      acc = fun.({key, Exmdb.decode(val, val_type)}, acc)
-      reduce_cursor(cur, key_type, val_type, txn_type, cont_op, limit, acc, fun)
+  defp start(range, cur, {:cont, acc}, fun) do
+    {_dbi, key_type, val_type} = range.db_spec
+    with {init_op, cont_op, limit} <- prepare(range, cur),
+         {:ok, key, val} <- cursor_get(cur, init_op, range.src.type) do
+      acc = fun.({Exmdb.decode(key, key_type), Exmdb.decode(val, val_type)}, acc)
+      reduce_cursor(range, {cur, cont_op, limit}, acc, fun)
     else
       :not_found ->
         {:cont, acc}
@@ -89,25 +99,26 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp reduce_cursor(cur, key_type, val_type, txn_type, op, to, {:cont, acc}, fun) do
-    case apply(cur, key_type, val_type, txn_type, op, to, acc, fun) do
+  defp reduce_cursor(range, cur_spec, {:cont, acc}, fun) do
+    case apply(range, cur_spec, acc, fun) do
       {:ok, acc} ->
-        reduce_cursor(cur, key_type, val_type, txn_type, op, to, acc, fun)
+        reduce_cursor(range, cur_spec, acc, fun)
       done ->
         done
     end
   end
-  defp reduce_cursor(_cur, _key_type, _val_type, _txn_type, _op, _to, { :halt, acc }, _fun) do
+  defp reduce_cursor(_range, _cur_spec, { :halt, acc }, _fun) do
     { :halt, acc }
   end
-  defp reduce_cursor(cur, key_type, val_type, txn_type, op, to, { :suspend, acc }, fun) do
-    { :suspend, acc, &reduce_cursor(cur, key_type, val_type, txn_type, op, to, &1, fun) }
+  defp reduce_cursor(range, cur_spec, { :suspend, acc }, fun) do
+    { :suspend, acc, &reduce_cursor(range, cur_spec, &1, fun) }
   end
 
-  defp apply(cur, key_type, val_type, txn_type, op, to, acc, fun) do
-    case cursor_get(cur, op, txn_type) do
+  defp apply(%Exmdb.Range{db_spec: db_spec, src: %Exmdb.Txn{type: txn_type}}, {cur, cont_op, limit}, acc, fun) do
+    {_dbi, key_type, val_type} = db_spec
+    case cursor_get(cur, cont_op, txn_type) do
       {:ok, key, val} ->
-        if binkey_in_range?(key, op, to) do
+        if binkey_in_range?(key, cont_op, limit) do
           {:ok, fun.({Exmdb.decode(key, key_type), Exmdb.decode(val, val_type)}, acc)}
         else
           {:cont, acc}
@@ -119,10 +130,10 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp prepare(cur, from, to, dir) do
-    limit = get_limit(to)
-    cont_op = get_cont_op(dir)
-    case get_init_op(from, dir, cur) do
+  defp prepare(range, cur) do
+    limit = get_limit(range.to)
+    cont_op = get_cont_op(range.direction)
+    case get_init_op(range, cur) do
       {:error, e} ->
         {:error, e}
       init_op ->
@@ -136,15 +147,15 @@ defimpl Enumerable, for: Exmdb.Range do
   defp get_cont_op(:fwd), do: :next
   defp get_cont_op(:bwd), do: :prev
 
-  defp get_init_op(:first, _dir, _cur), do: :first
-  defp get_init_op(:last, _dir, _cur), do: :last
-  defp get_init_op({:key, key}, :fwd, _cur), do: {:set_range, key}
-  defp get_init_op({:key, key}, :bwd, cur) do
-    case :elmdb.ro_txn_cursor_get(cur, {:set_range, key}) do
+  defp get_init_op(%Exmdb.Range{from: :first}, _cur), do: :first
+  defp get_init_op(%Exmdb.Range{from: :last}, _cur), do: :last
+  defp get_init_op(%Exmdb.Range{from: {:key, key}, direction: :fwd}, _cur), do: {:set_range, key}
+  defp get_init_op(%Exmdb.Range{from: {:key, key}, direction: :bwd, src: %Exmdb.Txn{type: txn_type}}, cur) do
+    case cursor_get(cur, {:set_range, key}, txn_type) do
       {:ok, ^key, _val} ->
         {:set, key}
       {:ok, _key, _val} ->
-        case :elmdb.ro_txn_cursor_get(cur, :prev) do
+        case cursor_get(cur, :prev, txn_type) do
           {:ok, new_key, _val} ->
             {:set, new_key}
           other ->
@@ -157,30 +168,34 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp get_txn(%Exmdb.Range{txn: nil, env_res: env_res}) do
+  defp ensure_txn(%Exmdb.Range{src: %Exmdb.Env{res: env_res} = env} = range) do
     case :elmdb.ro_txn_begin(env_res) do
-      {:ok, txn} ->
-        {:ok, txn, txn, :ro}
+      {:ok, txn_res} ->
+        txn = %Exmdb.Txn{res: txn_res, env: env, type: :ro}
+        {:ok, %Exmdb.Range{range|src: txn}}
       error ->
         error
     end
   end
-  defp get_txn(%Exmdb.Range{txn: txn}) do
-    {:ok, txn.res, nil, txn.type}
+  defp ensure_txn(%Exmdb.Range{src: %Exmdb.Txn{}} = range) do
+    {:ok, range}
   end
 
-  defp cursor_open(txn, dbi, :ro) do
-    :elmdb.ro_txn_cursor_open(txn, dbi)
-  end
-  defp cursor_open(txn, dbi, :rw) do
-    :elmdb.txn_cursor_open(txn, dbi)
+  defp cursor_open(%Exmdb.Range{src: %Exmdb.Txn{res: txn_res, type: txn_type}, db_spec: db_spec}) do
+    {dbi, _key_type, _val_type} = db_spec
+    case txn_type do
+      :ro ->
+        :elmdb.ro_txn_cursor_open(txn_res, dbi)
+      :rw ->
+        :elmdb.txn_cursor_open(txn_res, dbi)
+    end
   end
 
-  defp cursor_get(txn, op, :ro) do
-    :elmdb.ro_txn_cursor_get(txn, op)
+  defp cursor_get(cur, op, :ro) do
+    :elmdb.ro_txn_cursor_get(cur, op)
   end
-  defp cursor_get(txn, op, :rw) do
-    :elmdb.txn_cursor_get(txn, op)
+  defp cursor_get(cur, op, :rw) do
+    :elmdb.txn_cursor_get(cur, op)
   end
 
   defp binkey_in_range?(binkey, :next, to) do
@@ -190,17 +205,17 @@ defimpl Enumerable, for: Exmdb.Range do
     to == :first or binkey >= to
   end
 
-  defp close(cur, nil, :ro) do
+  defp close(%Exmdb.Range{close_txn?: false, src: %Exmdb.Txn{type: :ro}}, cur) do
     :elmdb.ro_txn_cursor_close(cur)
   end
-  defp close(_cur, nil, :rw) do
+  defp close(%Exmdb.Range{close_txn?: false, src: %Exmdb.Txn{type: :rw}}, _cur) do
     :ok
   end
-  defp close(cur, txn, :ro) do
-    :elmdb.ro_txn_abort(txn)
+  defp close(%Exmdb.Range{close_txn?: true, src: %Exmdb.Txn{res: res, type: :ro}}, cur) do
+    :elmdb.ro_txn_abort(res)
     :elmdb.ro_txn_cursor_close(cur)
   end
-  defp close(_cur, txn, :rw) do
-    :elmdb.txn_commit(txn)
+  defp close(%Exmdb.Range{close_txn?: true, src: %Exmdb.Txn{res: res, type: :rw}}, _cur) do
+    :elmdb.txn_commit(res)
   end
 end
