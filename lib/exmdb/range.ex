@@ -1,24 +1,19 @@
 defmodule Exmdb.Range do
   import Exmdb.Util
 
-  defstruct from: :first, to: :last, direction: :fwd, src: nil, db_spec: nil, close_txn?: true
+  defstruct from: :first, to: :last, direction: :fwd, ctx: nil, db_spec: nil, is_ctx_owner: false
 
   def new(env_or_txn, opts \\ []) do
     {_dbi, key_type, _val_type} = db_spec = get_db_spec(env_or_txn, opts)
     from = opts |> Keyword.get(:from, :first) |> validate_range(key_type)
     to = opts |> Keyword.get(:to, :last) |> validate_range(key_type)
     direction = direction(from, to)
-    close_txn = case env_or_txn do
-                  %Exmdb.Env{} -> true
-                  %Exmdb.Txn{} -> false
-                end
     %Exmdb.Range{
-      src: env_or_txn,
+      ctx: env_or_txn,
       from: from,
       to: to,
       direction: direction,
-      db_spec: db_spec,
-      close_txn?: close_txn
+      db_spec: db_spec
     }
   end
 
@@ -93,7 +88,7 @@ defimpl Enumerable, for: Exmdb.Range do
   defp start(range, cur, {:cont, acc}, fun) do
     {_dbi, key_type, val_type} = range.db_spec
     with {init_op, cont_op, limit} <- prepare(range, cur),
-         {:ok, key, val} <- cursor_get(cur, init_op, range.src.type) do
+         {:ok, key, val} <- cursor_get(cur, init_op, range.ctx.type) do
       acc = fun.({decode(key, key_type), decode(val, val_type)}, acc)
       reduce_cursor(range, {cur, cont_op, limit}, acc, fun)
     else
@@ -119,7 +114,7 @@ defimpl Enumerable, for: Exmdb.Range do
     { :suspend, acc, &reduce_cursor(range, cur_spec, &1, fun) }
   end
 
-  defp apply(%Range{db_spec: db_spec, src: %Txn{type: txn_type}}, {cur, cont_op, limit}, acc, fun) do
+  defp apply(%Range{db_spec: db_spec, ctx: %Txn{type: txn_type}}, {cur, cont_op, limit}, acc, fun) do
     {_dbi, key_type, val_type} = db_spec
     case cursor_get(cur, cont_op, txn_type) do
       {:ok, key, val} ->
@@ -152,7 +147,7 @@ defimpl Enumerable, for: Exmdb.Range do
   defp get_init_op(%Range{from: :first}, _cur), do: :first
   defp get_init_op(%Range{from: :last}, _cur), do: :last
   defp get_init_op(%Range{from: key, direction: :fwd}, _cur), do: {:set_range, key}
-  defp get_init_op(%Range{from: key, direction: :bwd, src: %Txn{type: txn_type}}, cur) do
+  defp get_init_op(%Range{from: key, direction: :bwd, ctx: %Txn{type: txn_type}}, cur) do
     case cursor_get(cur, {:set_range, key}, txn_type) do
       {:ok, ^key, _val} ->
         {:set, key}
@@ -170,20 +165,20 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp ensure_txn(%Range{src: %Env{res: env_res} = env} = range) do
+  defp ensure_txn(%Range{ctx: %Env{res: env_res} = env} = range) do
     case :elmdb.ro_txn_begin(env_res) do
       {:ok, txn_res} ->
         txn = %Txn{res: txn_res, env: env, type: :ro}
-        {:ok, %Range{range|src: txn}}
+        {:ok, %Range{range|ctx: txn, is_ctx_owner: true}}
       error ->
         error
     end
   end
-  defp ensure_txn(%Range{src: %Txn{}} = range) do
+  defp ensure_txn(%Range{ctx: %Txn{}} = range) do
     {:ok, range}
   end
 
-  defp cursor_open(%Range{src: %Txn{res: txn_res, type: txn_type}, db_spec: db_spec}) do
+  defp cursor_open(%Range{ctx: %Txn{res: txn_res, type: txn_type}, db_spec: db_spec}) do
     {dbi, _key_type, _val_type} = db_spec
     case txn_type do
       :ro ->
@@ -207,17 +202,17 @@ defimpl Enumerable, for: Exmdb.Range do
     to == :first or binkey >= to
   end
 
-  defp close(%Range{close_txn?: false, src: %Txn{type: :ro}}, cur) do
+  defp close(%Range{is_ctx_owner: false, ctx: %Txn{type: :ro}}, cur) do
     :elmdb.ro_txn_cursor_close(cur)
   end
-  defp close(%Range{close_txn?: false, src: %Txn{type: :rw}}, _cur) do
+  defp close(%Range{is_ctx_owner: false, ctx: %Txn{type: :rw}}, _cur) do
     :ok
   end
-  defp close(%Range{close_txn?: true, src: %Txn{res: res, type: :ro}}, cur) do
+  defp close(%Range{is_ctx_owner: true, ctx: %Txn{res: res, type: :ro}}, cur) do
     :elmdb.ro_txn_abort(res)
     :elmdb.ro_txn_cursor_close(cur)
   end
-  defp close(%Range{close_txn?: true, src: %Txn{res: res, type: :rw}}, _cur) do
+  defp close(%Range{is_ctx_owner: true, ctx: %Txn{res: res, type: :rw}}, _cur) do
     :elmdb.txn_commit(res)
   end
 end
