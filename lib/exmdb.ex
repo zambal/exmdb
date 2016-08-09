@@ -1,6 +1,6 @@
 defmodule Exmdb do
   alias Exmdb.{Env, Range, Txn}
-  import Util
+  import Exmdb.Util
 
   @spec create(Path.t, Env.env_create_opts) :: {:ok, Env.t} | {:error, :exists}
   defdelegate create(path, opts \\ []), to: Env
@@ -13,7 +13,7 @@ defmodule Exmdb do
 
   def put(env_or_txn, key, value, opts \\ [])
   def put(%Env{dbs: dbs} = env, key, value, opts) do
-    {dbi, key_type, val_type} = expand_db_spec(dbs, opts)
+    {dbi, key_type, val_type} = db_spec(dbs, opts)
     case :elmdb.async_put(dbi, encode(key, key_type), encode(value, val_type)) do
       :ok ->
         env
@@ -22,7 +22,7 @@ defmodule Exmdb do
     end
   end
   def put(%Txn{type: :rw, res: res, env: env}, key, value, opts) do
-    {dbi, key_type, val_type} = expand_db_spec(env.dbs, opts)
+    {dbi, key_type, val_type} = db_spec(env.dbs, opts)
     case :elmdb.txn_put(res, dbi, encode(key, key_type), encode(value, val_type), timeout(opts)) do
       :ok ->
         env
@@ -33,7 +33,7 @@ defmodule Exmdb do
 
   def get(env_or_txn, key, default \\ nil, opts \\ [])
   def get(%Env{dbs: dbs}, key, default, opts) do
-    {dbi, key_type, val_type} = expand_db_spec(dbs, opts)
+    {dbi, key_type, val_type} = db_spec(dbs, opts)
     case :elmdb.get(dbi, encode(key, key_type)) do
       {:ok, val} ->
         decode(val, val_type)
@@ -44,7 +44,7 @@ defmodule Exmdb do
     end
   end
   def get(%Txn{type: :rw, res: res, env: env}, key, default, opts) do
-    {dbi, key_type, val_type} = expand_db_spec(env.dbs, opts)
+    {dbi, key_type, val_type} = db_spec(env.dbs, opts)
     case :elmdb.txn_get(res, dbi, encode(key, key_type), timeout(opts)) do
       {:ok, val} ->
         decode(val, val_type)

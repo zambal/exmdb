@@ -7,33 +7,20 @@ defmodule Exmdb.Util do
     Keyword.get(opts, :timeout, @default_timeout)
   end
 
-  def expand_db_spec(dbs, opts) do
+  def db_spec(dbs, opts) do
     case Keyword.get(opts, :db) do
       nil ->
+        if is_map(dbs), do: raise "db name required"
+        dbs
+      name ->
         if is_map(dbs) do
-          raise "db name required"
-        end
-        expand_db_spec(dbs)
-      name when is_binary(name) ->
-        if is_map(dbs) do
-          db = Map.get(dbs, name)
-          if is_nil(db) do
-            raise "named database could not be found"
-          end
-          expand_db_spec(db)
+          db_spec = Map.get(dbs, name)
+          if is_nil(db_spec), do: raise "named database could not be found"
+          db_spec
         else
           raise "named databases not supported"
         end
     end
-  end
-
-  defp expand_db_spec(db) do
-    {dbi, spec} = db
-    {
-      dbi,
-      Keyword.get(spec, :key_type, :ordered_term),
-      Keyword.get(spec, :val_type, :term)
-    }
   end
 
   def encode(data, :binary), do: data

@@ -3,13 +3,15 @@ defmodule Exmdb.Env do
 
   @type db_name :: String.t
 
-  @type db_spec :: [{:key_type, :binary | :term | :ordered_term} |
-                    {:val_type, :binary | :term | :ordered_term} |
-                    {:reverse_key, boolean} |
-                    {:dup_sort, boolean} |
-                    {:reverse_dup, boolean}]
+  @type data_type :: :binary | :term | :ordered_term
 
-  @type db_specs :: %{required(db_name) => db_spec} | db_spec
+  @type db_config :: [{:key_type, data_type} |
+                      {:val_type, data_type} |
+                      {:reverse_key, boolean} |
+                      {:dup_sort, boolean} |
+                      {:reverse_dup, boolean}]
+
+  @type dbs_config :: %{required(db_name) => db_config} | db_config
 
   @type env_opt :: {:map_size, non_neg_integer} |
                    {:read_only, boolean} |
@@ -20,13 +22,13 @@ defmodule Exmdb.Env do
 
   @type env_opts :: [env_opt]
 
-  @type env_create_opt :: {:dbs, db_specs} | {:force, boolean}
+  @type env_create_opt :: {:dbs, dbs_config} | {:force, boolean}
 
   @type env_create_opts :: [env_opt | env_create_opt]
 
-  @type db :: {binary, db_spec}
+  @type db_spec :: {binary, data_type, data_type}
 
-  @type dbs :: %{required(db_name) => db} | db
+  @type dbs :: %{required(db_name) => db_spec} | db_spec
 
   @opaque t :: %Exmdb.Env{res: binary, path: Path.t, dbs: dbs, opts: env_opts}
 
@@ -44,8 +46,8 @@ defmodule Exmdb.Env do
 
   def open(path, opts \\ []) do
     if exists?(path, opts) do
-      db_specs = read_config(path)
-      opts = Keyword.put(opts, :dbs, db_specs)
+      dbs_config = read_config(path)
+      opts = Keyword.put(opts, :dbs, dbs_config)
 
       {:ok, path
        |> open_env(opts)
@@ -135,20 +137,26 @@ defmodule Exmdb.Env do
   end
 
   defp open_dbs(%Exmdb.Env{res: res} = env, opts, create) do
-    db_specs = Keyword.get(opts, :dbs, [])
-    dbs = if is_map(db_specs) do
-      for {name, spec} <- db_specs, into: %{} do
-        {name, {open_db(res, name, spec, create), spec}}
+    dbs_config = Keyword.get(opts, :dbs, [])
+    dbs = if is_map(dbs_config) do
+      for {name, config} <- dbs_config, into: %{} do
+        dbi = open_db(res, name, config, create)
+        key_type = Keyword.get(config, :key_type, :binary)
+        val_type = Keyword.get(config, :val_type, :term)
+        {name, {dbi, key_type, val_type}}
       end
     else
-      {open_db(res, "", db_specs, create), db_specs}
+      dbi = open_db(res, "", dbs_config, create)
+      key_type = Keyword.get(dbs_config, :key_type, :binary)
+      val_type = Keyword.get(dbs_config, :val_type, :term)
+      {dbi, key_type, val_type}
     end
     %Exmdb.Env{env|dbs: dbs}
   end
 
-  defp open_db(env_res, name, spec, create) do
-    db_opts = build_db_opts(spec, create)
-    case :elmdb.db_open(env_res, name, db_opts) do
+  defp open_db(env_res, name, config, create) do
+    opts = build_db_opts(config, create)
+    case :elmdb.db_open(env_res, name, opts) do
       {:ok, dbi_res} ->
         dbi_res
       {:error, {_code, msg}} ->
@@ -179,13 +187,13 @@ defmodule Exmdb.Env do
   end
 
   defp write_config(%Exmdb.Env{path: path} = env, opts) do
-    bin_db_specs = opts
+    bin_config = opts
     |> Keyword.get(:dbs, [])
     |> :erlang.term_to_binary()
 
     :ok = path
     |> config_path()
-    |> File.write!(bin_db_specs)
+    |> File.write!(bin_config)
 
     env
   end

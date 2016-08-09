@@ -1,5 +1,5 @@
 defmodule Exmdb.Range do
-  import Util
+  import Exmdb.Util
 
   defstruct from: :first, to: :last, direction: :fwd, src: nil, db_spec: nil, close_txn?: true
 
@@ -23,10 +23,10 @@ defmodule Exmdb.Range do
   end
 
   defp get_db_spec(%Exmdb.Env{dbs: dbs}, opts) do
-    expand_db_spec(dbs, opts)
+    db_spec(dbs, opts)
   end
   defp get_db_spec(%Exmdb.Txn{env: env}, opts) do
-    expand_db_spec(env.dbs, opts)
+    db_spec(env.dbs, opts)
   end
 
   defp validate_range({:key, key}, key_type) do
@@ -52,7 +52,7 @@ end
 
 defimpl Enumerable, for: Exmdb.Range do
   alias Exmdb.{Env, Range, Txn}
-  import Util
+  import Exmdb.Util
 
   def count(_range) do
     { :error, __MODULE__ }
