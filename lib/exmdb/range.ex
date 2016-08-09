@@ -90,7 +90,7 @@ defimpl Enumerable, for: Exmdb.Range do
     with {init_op, cont_op, limit} <- prepare(range, cur),
          {:ok, key, val} <- cursor_get(cur, init_op, range.ctx.type) do
       acc = fun.({decode(key, key_type), decode(val, val_type)}, acc)
-      reduce_cursor(range, {cur, cont_op, limit}, acc, fun)
+      reduce_cursor({cur, cont_op, limit, key_type, val_type, range.ctx.type}, acc, fun)
     else
       :not_found ->
         {:cont, acc}
@@ -99,27 +99,11 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp reduce_cursor(range, cur_spec, {:cont, acc}, fun) do
-    case apply(range, cur_spec, acc, fun) do
-      {:ok, acc} ->
-        reduce_cursor(range, cur_spec, acc, fun)
-      done ->
-        done
-    end
-  end
-  defp reduce_cursor(_range, _cur_spec, { :halt, acc }, _fun) do
-    { :halt, acc }
-  end
-  defp reduce_cursor(range, cur_spec, { :suspend, acc }, fun) do
-    { :suspend, acc, &reduce_cursor(range, cur_spec, &1, fun) }
-  end
-
-  defp apply(%Range{db_spec: db_spec, ctx: %Txn{type: txn_type}}, {cur, cont_op, limit}, acc, fun) do
-    {_dbi, key_type, val_type} = db_spec
+  defp reduce_cursor({cur, cont_op, limit, key_type, val_type, txn_type} = state, {:cont, acc}, fun) do
     case cursor_get(cur, cont_op, txn_type) do
       {:ok, key, val} ->
         if binkey_in_range?(key, cont_op, limit) do
-          {:ok, fun.({decode(key, key_type), decode(val, val_type)}, acc)}
+          reduce_cursor(state, fun.({decode(key, key_type), decode(val, val_type)}, acc), fun)
         else
           {:cont, acc}
         end
@@ -128,6 +112,12 @@ defimpl Enumerable, for: Exmdb.Range do
       error ->
         error
     end
+  end
+  defp reduce_cursor(_state, { :halt, acc }, _fun) do
+    { :halt, acc }
+  end
+  defp reduce_cursor(state, { :suspend, acc }, fun) do
+    { :suspend, acc, &reduce_cursor(state, &1, fun) }
   end
 
   defp prepare(range, cur) do
