@@ -17,22 +17,12 @@ defmodule Exmdb.Range do
     }
   end
 
-  defp get_db_spec(%Exmdb.Env{dbs: dbs}, opts) do
-    db_spec(dbs, opts)
-  end
-  defp get_db_spec(%Exmdb.Txn{env: env}, opts) do
-    db_spec(env.dbs, opts)
-  end
+  defp get_db_spec(%Exmdb.Env{dbs: dbs}, opts), do: db_spec(dbs, opts)
+  defp get_db_spec(%Exmdb.Txn{env: env}, opts), do: db_spec(env.dbs, opts)
 
-  defp validate_range({:key, key}, key_type) do
-    encode(key, key_type)
-  end
-  defp validate_range(:first, _key_type) do
-    :first
-  end
-  defp validate_range(:last, _key_type) do
-    :last
-  end
+  defp validate_range({:key, key}, key_type), do: encode(key, key_type)
+  defp validate_range(:first, _key_type), do: :first
+  defp validate_range(:last, _key_type), do: :last
   defp validate_range(badarg, _key_type) do
     raise ArgumentError, message: "expected :first, :last, or {:key, key}, got: #{inspect badarg}"
   end
@@ -49,9 +39,7 @@ defimpl Enumerable, for: Exmdb.Range do
   alias Exmdb.{Env, Range, Txn}
   import Exmdb.Util
 
-  def count(_range) do
-    { :error, __MODULE__ }
-  end
+  def count(_range), do: { :error, __MODULE__ }
 
   def member?(%Range{db_spec: {dbi, key_type, val_type}}, {key, val}) do
     {:ok, case :elmdb.get(dbi, encode(key, key_type)) do
@@ -175,19 +163,11 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp cursor_get(cur, op, :ro) do
-    :elmdb.ro_txn_cursor_get(cur, op)
-  end
-  defp cursor_get(cur, op, :rw) do
-    :elmdb.txn_cursor_get(cur, op)
-  end
+  defp cursor_get(cur, op, :ro), do: :elmdb.ro_txn_cursor_get(cur, op)
+  defp cursor_get(cur, op, :rw), do: :elmdb.txn_cursor_get(cur, op)
 
-  defp binkey_in_range?(binkey, :next, to) do
-    to == :last or binkey <= to
-  end
-  defp binkey_in_range?(binkey, :prev, to) do
-    to == :first or binkey >= to
-  end
+  defp binkey_in_range?(binkey, :next, to), do: to == :last or binkey <= to
+  defp binkey_in_range?(binkey, :prev, to), do: to == :first or binkey >= to
 
   defp close(%Range{is_ctx_owner: false, ctx: %Txn{type: :ro}}, cur) do
     :elmdb.ro_txn_cursor_close(cur)
