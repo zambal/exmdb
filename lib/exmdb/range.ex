@@ -55,12 +55,9 @@ defimpl Enumerable, for: Exmdb.Range do
 
   def member?(%Range{db_spec: {dbi, key_type, val_type}}, {key, val}) do
     {:ok, case :elmdb.get(dbi, encode(key, key_type)) do
-            {:ok, bin} ->
-              decode(bin, val_type) == val
-            :not_found ->
-              false
-            {:error, {_code, msg}} ->
-              raise List.to_string(msg)
+            {:ok, bin}  ->  val == decode(bin, val_type)
+            :not_found  -> false
+            {:error, e} -> mdb_error(e)
           end}
   end
 
@@ -76,12 +73,12 @@ defimpl Enumerable, for: Exmdb.Range do
         {:halt, acc} ->
           close(range, cur)
           {:halted, acc}
-        {:error, {_code, msg}} ->
-          raise List.to_string(msg)
+        {:error, e} ->
+          mdb_error(e)
       end
     else
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      {:error, e} ->
+        mdb_error(e)
     end
   end
 

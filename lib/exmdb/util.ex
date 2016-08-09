@@ -1,12 +1,6 @@
 defmodule Exmdb.Util do
   @moduledoc false
 
-  @default_timeout 5_000
-
-  def timeout(opts) do
-    Keyword.get(opts, :timeout, @default_timeout)
-  end
-
   def db_spec(dbs, opts) do
     case Keyword.get(opts, :db) do
       nil ->
@@ -30,4 +24,17 @@ defmodule Exmdb.Util do
   def decode(data, :binary), do: data
   def decode(data, :term), do: :erlang.binary_to_term(data)
   def decode(data, :ordered_term), do: :sext.decode(data)
+
+  defmacro timeout(opts) do
+    quote do
+      Keyword.get(unquote(opts), :timeout, 5_000)
+    end
+  end
+
+  defmacro mdb_error(e) do
+    quote do
+      {_code, msg} = unquote(e)
+      raise List.to_string(msg)
+    end
+  end
 end

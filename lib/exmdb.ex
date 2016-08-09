@@ -15,19 +15,15 @@ defmodule Exmdb do
   def put(%Env{dbs: dbs} = env, key, value, opts) do
     {dbi, key_type, val_type} = db_spec(dbs, opts)
     case :elmdb.async_put(dbi, encode(key, key_type), encode(value, val_type)) do
-      :ok ->
-        env
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      :ok         -> env
+      {:error, e} -> mdb_error(e)
     end
   end
   def put(%Txn{type: :rw, res: res, env: env}, key, value, opts) do
     {dbi, key_type, val_type} = db_spec(env.dbs, opts)
     case :elmdb.txn_put(res, dbi, encode(key, key_type), encode(value, val_type), timeout(opts)) do
-      :ok ->
-        env
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      :ok         -> env
+      {:error, e} -> mdb_error(e)
     end
   end
 
@@ -35,23 +31,17 @@ defmodule Exmdb do
   def get(%Env{dbs: dbs}, key, default, opts) do
     {dbi, key_type, val_type} = db_spec(dbs, opts)
     case :elmdb.get(dbi, encode(key, key_type)) do
-      {:ok, val} ->
-        decode(val, val_type)
-      :not_found ->
-        default
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      {:ok, val}  -> decode(val, val_type)
+      :not_found  -> default
+      {:error, e} -> mdb_error(e)
     end
   end
   def get(%Txn{type: :rw, res: res, env: env}, key, default, opts) do
     {dbi, key_type, val_type} = db_spec(env.dbs, opts)
     case :elmdb.txn_get(res, dbi, encode(key, key_type), timeout(opts)) do
-      {:ok, val} ->
-        decode(val, val_type)
-      :not_found ->
-        default
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      {:ok, val}  -> decode(val, val_type)
+      :not_found  -> default
+      {:error, e} -> mdb_error(e)
     end
   end
 
@@ -80,14 +70,12 @@ defmodule Exmdb do
             throw(reason)
         else result ->
           case txn_commit(txn_res, timeout, txn_type) do
-            :ok ->
-              {:ok, result}
-            {:error, {_code, msg}} ->
-              raise msg
+            :ok         -> {:ok, result}
+            {:error, e} -> mdb_error(e)
           end
         end
-      {:error, {_code, msg}} ->
-        raise msg
+      {:error, e} ->
+        mdb_error(e)
     end
   end
 
