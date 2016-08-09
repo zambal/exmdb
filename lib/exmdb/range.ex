@@ -1,4 +1,6 @@
 defmodule Exmdb.Range do
+  import Util
+
   defstruct from: :first, to: :last, direction: :fwd, src: nil, db_spec: nil, close_txn?: true
 
   def new(env_or_txn, opts \\ []) do
@@ -21,14 +23,14 @@ defmodule Exmdb.Range do
   end
 
   defp get_db_spec(%Exmdb.Env{dbs: dbs}, opts) do
-    Exmdb.expand_db_spec(dbs, opts)
+    expand_db_spec(dbs, opts)
   end
   defp get_db_spec(%Exmdb.Txn{env: env}, opts) do
-    Exmdb.expand_db_spec(env.dbs, opts)
+    expand_db_spec(env.dbs, opts)
   end
 
   defp validate_range({:key, key}, key_type) do
-    Exmdb.encode(key, key_type)
+    encode(key, key_type)
   end
   defp validate_range(:first, _key_type) do
     :first
@@ -50,15 +52,16 @@ end
 
 defimpl Enumerable, for: Exmdb.Range do
   alias Exmdb.{Env, Range, Txn}
+  import Util
 
   def count(_range) do
     { :error, __MODULE__ }
   end
 
   def member?(%Range{db_spec: {dbi, key_type, val_type}}, {key, val}) do
-    {:ok, case :elmdb.get(dbi, Exmdb.encode(key, key_type)) do
+    {:ok, case :elmdb.get(dbi, encode(key, key_type)) do
             {:ok, bin} ->
-              Exmdb.decode(bin, val_type) == val
+              decode(bin, val_type) == val
             :not_found ->
               false
             {:error, {_code, msg}} ->
@@ -91,7 +94,7 @@ defimpl Enumerable, for: Exmdb.Range do
     {_dbi, key_type, val_type} = range.db_spec
     with {init_op, cont_op, limit} <- prepare(range, cur),
          {:ok, key, val} <- cursor_get(cur, init_op, range.src.type) do
-      acc = fun.({Exmdb.decode(key, key_type), Exmdb.decode(val, val_type)}, acc)
+      acc = fun.({decode(key, key_type), decode(val, val_type)}, acc)
       reduce_cursor(range, {cur, cont_op, limit}, acc, fun)
     else
       :not_found ->
@@ -121,7 +124,7 @@ defimpl Enumerable, for: Exmdb.Range do
     case cursor_get(cur, cont_op, txn_type) do
       {:ok, key, val} ->
         if binkey_in_range?(key, cont_op, limit) do
-          {:ok, fun.({Exmdb.decode(key, key_type), Exmdb.decode(val, val_type)}, acc)}
+          {:ok, fun.({decode(key, key_type), decode(val, val_type)}, acc)}
         else
           {:cont, acc}
         end

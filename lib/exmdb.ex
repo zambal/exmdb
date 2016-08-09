@@ -1,5 +1,6 @@
 defmodule Exmdb do
-  alias Exmdb.{Env, Txn, Range}
+  alias Exmdb.{Env, Range, Txn}
+  import Util
 
   @spec create(Path.t, Env.env_create_opts) :: {:ok, Env.t} | {:error, :exists}
   defdelegate create(path, opts \\ []), to: Env
@@ -9,8 +10,6 @@ defmodule Exmdb do
 
   @spec close(Env.t) :: :ok
   defdelegate close(env), to: Env
-
-  @default_timeout 5_000
 
   def put(env_or_txn, key, value, opts \\ [])
   def put(%Env{dbs: dbs} = env, key, value, opts) do
@@ -24,7 +23,7 @@ defmodule Exmdb do
   end
   def put(%Txn{type: :rw, res: res, env: env}, key, value, opts) do
     {dbi, key_type, val_type} = expand_db_spec(env.dbs, opts)
-    case :elmdb.txn_put(res, dbi, encode(key, key_type), encode(value, val_type), Keyword.get(opts, :timeout, @default_timeout)) do
+    case :elmdb.txn_put(res, dbi, encode(key, key_type), encode(value, val_type), timeout(opts)) do
       :ok ->
         env
       {:error, {_code, msg}} ->
@@ -46,7 +45,7 @@ defmodule Exmdb do
   end
   def get(%Txn{type: :rw, res: res, env: env}, key, default, opts) do
     {dbi, key_type, val_type} = expand_db_spec(env.dbs, opts)
-    case :elmdb.txn_get(res, dbi, encode(key, key_type), Keyword.get(opts, :timeout, @default_timeout)) do
+    case :elmdb.txn_get(res, dbi, encode(key, key_type), timeout(opts)) do
       {:ok, val} ->
         decode(val, val_type)
       :not_found ->
@@ -57,7 +56,7 @@ defmodule Exmdb do
   end
 
   def transaction(%Env{res: res} = env, fun, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, @default_timeout)
+    timeout = timeout(opts)
     txn_type = Keyword.get(opts, :type, :rw)
     case txn_begin(res, timeout, txn_type) do
       {:ok, txn_res} ->
@@ -118,44 +117,4 @@ defmodule Exmdb do
   defp txn_abort(txn_res, _timeout, :ro) do
     :elmdb.ro_txn_abort(txn_res)
   end
-
-  @doc false
-  def expand_db_spec(dbs, opts) do
-    case Keyword.get(opts, :db) do
-      nil ->
-        if is_map(dbs) do
-          raise "db name required"
-        end
-        expand_db_spec(dbs)
-      name when is_binary(name) ->
-        if is_map(dbs) do
-          db = Map.get(dbs, name)
-          if is_nil(db) do
-            raise "named database could not be found"
-          end
-          expand_db_spec(db)
-        else
-          raise "named databases not supported"
-        end
-    end
-  end
-
-  defp expand_db_spec(db) do
-    {dbi, spec} = db
-    {
-      dbi,
-      Keyword.get(spec, :key_type, :ordered_term),
-      Keyword.get(spec, :val_type, :term)
-    }
-  end
-
-  @doc false
-  def encode(data, :binary), do: data
-  def encode(data, :term), do: :erlang.term_to_binary(data)
-  def encode(data, :ordered_term), do: :sext.encode(data)
-
-  @doc false
-  def decode(data, :binary), do: data
-  def decode(data, :term), do: :erlang.binary_to_term(data)
-  def decode(data, :ordered_term), do: :sext.decode(data)
 end
