@@ -15,7 +15,7 @@ defmodule Exmdb.Util do
       name ->
         if is_map(dbs) do
           db_spec = Map.get(dbs, name)
-          if is_nil(db_spec), do: raise "named database could not be found"
+          if is_nil(db_spec), do: raise "named database #{inspect name} could not be found"
           db_spec
         else
           raise "named databases not supported"
