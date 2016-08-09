@@ -28,7 +28,7 @@ defmodule Exmdb.Range do
   end
 
   defp validate_range({:key, key}, key_type) do
-    {:key, Exmdb.encode(key, key_type)}
+    Exmdb.encode(key, key_type)
   end
   defp validate_range(:first, _key_type) do
     :first
@@ -44,7 +44,7 @@ defmodule Exmdb.Range do
   defp direction(:last, _to), do: :bwd
   defp direction(_from, :last), do: :fwd
   defp direction(_from, :first), do: :bwd
-  defp direction({:key, from}, {:key, to}) when from <= to, do: :fwd
+  defp direction(from, to) when from <= to, do: :fwd
   defp direction(_from, _to), do: :bwd
 end
 
@@ -133,7 +133,7 @@ defimpl Enumerable, for: Exmdb.Range do
   end
 
   defp prepare(range, cur) do
-    limit = get_limit(range.to)
+    limit = range.to
     cont_op = get_cont_op(range.direction)
     case get_init_op(range, cur) do
       {:error, e} ->
@@ -143,16 +143,13 @@ defimpl Enumerable, for: Exmdb.Range do
     end
   end
 
-  defp get_limit({:key, key}), do: key
-  defp get_limit(other), do: other
-
   defp get_cont_op(:fwd), do: :next
   defp get_cont_op(:bwd), do: :prev
 
   defp get_init_op(%Range{from: :first}, _cur), do: :first
   defp get_init_op(%Range{from: :last}, _cur), do: :last
-  defp get_init_op(%Range{from: {:key, key}, direction: :fwd}, _cur), do: {:set_range, key}
-  defp get_init_op(%Range{from: {:key, key}, direction: :bwd, src: %Txn{type: txn_type}}, cur) do
+  defp get_init_op(%Range{from: key, direction: :fwd}, _cur), do: {:set_range, key}
+  defp get_init_op(%Range{from: key, direction: :bwd, src: %Txn{type: txn_type}}, cur) do
     case cursor_get(cur, {:set_range, key}, txn_type) do
       {:ok, ^key, _val} ->
         {:set, key}
