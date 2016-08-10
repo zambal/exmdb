@@ -93,6 +93,9 @@ defmodule Exmdb do
   @spec range(source, Range.opts) :: Range.t
   defdelegate range(env_or_txn, opts \\ []), to: Range, as: :new
 
+  @spec collect(source, query_opts) :: Exmdb.Collectable.t
+  defdelegate collect(env_or_txn, opts \\ []), to: Exmdb.Collectable, as: :new
+
   defp txn_begin(txn_res, timeout, :rw) do
     :elmdb.txn_begin(txn_res, timeout)
   end

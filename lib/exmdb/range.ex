@@ -23,7 +23,7 @@ defmodule Exmdb.Range do
     {:db, binary}
   ]
 
-  def new(env_or_txn, opts \\ []) do
+  def new(env_or_txn, opts) do
     {_dbi, key_type, _val_type} = db_spec = get_db_spec(env_or_txn, opts)
     from = opts |> Keyword.get(:from, :first) |> validate_range(key_type)
     to = opts |> Keyword.get(:to, :last) |> validate_range(key_type)
