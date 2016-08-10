@@ -22,32 +22,31 @@ end
 
 defimpl Collectable, for: Exmdb.Collectable do
   import Exmdb.Util
+  alias Exmdb.{Env, Txn}
 
   def into(original) do
     {original, fn
-      %Exmdb.Collectable{src: src, db_spec: db_spec, timeout: timeout} = col, {:cont, {k, v}} ->
-        :ok = put(src, k, v, db_spec, timeout)
-        col
-      col, :done ->
-        col.src
-      _, :halt ->
-        :ok
+      col, {:cont, {k, v}} -> put(col, k, v)
+      col, :done           -> col.src
+      _col, :halt          -> :ok
     end}
   end
 
-  defp put(%Exmdb.Env{}, key, value, {dbi, key_type, val_type}, timeout) do
+  defp put(%{src: %Env{}, db_spec: db_spec, timeout: timeout} = col, key, value) do
+    {dbi, key_type, val_type} = db_spec
     case :elmdb.async_put(dbi, encode(key, key_type), encode(value, val_type), timeout) do
-      :ok         -> :ok
+      :ok         -> col
       {:error, e} -> mdb_error(e)
     end
   end
-  defp put(%Exmdb.Txn{type: :rw, res: res}, key, value, {dbi, key_type, val_type}, timeout) do
+  defp put(%{src: %Txn{type: :rw, res: res}, db_spec: db_spec, timeout: timeout} = col, key, value) do
+    {dbi, key_type, val_type} = db_spec
     case :elmdb.txn_put(res, dbi, encode(key, key_type), encode(value, val_type), timeout) do
-      :ok         -> :ok
+      :ok         -> col
       {:error, e} -> mdb_error(e)
     end
   end
-  defp put(%Exmdb.Txn{type: :ro}, _key, _value, _db_spec, _timeout) do
+  defp put(%{src: %Txn{type: :ro}}, _key, _value) do
     raise ArgumentError, message: "Exmdb.Collectable can only be used within a read/write transaction"
   end
 end
