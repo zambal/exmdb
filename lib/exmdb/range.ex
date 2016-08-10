@@ -3,6 +3,26 @@ defmodule Exmdb.Range do
 
   defstruct from: :first, to: :last, direction: :fwd, src: nil, db_spec: nil, is_src_owner: false
 
+  @type range_spec :: :first | :last | binary
+  @type direction :: :fwd | :bwd
+
+  @type t :: %Exmdb.Range{
+    from: range_def,
+    to: range_def,
+    direction: direction,
+    src: Exmdb.source,
+    db_spec: Exmdb.Env.db_spec,
+    is_src_owner: boolean
+  }
+
+  @type range_def :: range_spec | {:key, any}
+
+  @type opts :: [
+    {:from, range_spec} |
+    {:to, range_spec} |
+    {:db, binary}
+  ]
+
   def new(env_or_txn, opts \\ []) do
     {_dbi, key_type, _val_type} = db_spec = get_db_spec(env_or_txn, opts)
     from = opts |> Keyword.get(:from, :first) |> validate_range(key_type)
@@ -55,12 +75,12 @@ defimpl Enumerable, for: Exmdb.Range do
          {:ok, cur} <- cursor_open(range) do
       case reduce(range, cur, acc, fun) do
         {:cont, acc} ->
-          close(range, cur)
+          :ok = close(range, cur)
           {:done, acc}
-        {:suspend, acc} ->
-          {:suspended, acc}
+        {:suspend, acc, fun} ->
+          {:suspended, acc, fun}
         {:halt, acc} ->
-          close(range, cur)
+          :ok = close(range, cur)
           {:halted, acc}
         {:error, e} ->
           mdb_error(e)
@@ -169,11 +189,14 @@ defimpl Enumerable, for: Exmdb.Range do
   defp binkey_in_range?(binkey, :prev, to), do: to == :first or binkey >= to
 
   defp close(%Range{is_src_owner: true, src: %Txn{res: res, type: :ro}}, cur) do
-    :elmdb.ro_txn_abort(res)
+    _ = :elmdb.ro_txn_abort(res)
     :elmdb.ro_txn_cursor_close(cur)
   end
   defp close(%Range{is_src_owner: true, src: %Txn{res: res, type: :rw}}, _cur) do
-    :elmdb.txn_commit(res)
+    case :elmdb.txn_commit(res) do
+      :ok         -> :ok
+      {:error, e} -> mdb_error(e)
+    end
   end
   defp close(%Range{is_src_owner: false, src: %Txn{type: :ro}}, cur) do
     :elmdb.ro_txn_cursor_close(cur)

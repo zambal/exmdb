@@ -32,12 +32,12 @@ defmodule Exmdb.Env do
 
   @type dbs :: %{required(db_name) => db_spec} | db_spec
 
-  @opaque t :: %Exmdb.Env{res: binary, path: Path.t, dbs: dbs, opts: env_opts}
+  @type t :: %Exmdb.Env{res: binary, path: Path.t, dbs: dbs, opts: env_opts}
 
 
   def create(path, opts \\ []) do
     if exists?(path, opts) do
-      {:error, :exits}
+      {:error, :exists}
     else
       {:ok, path
        |> open_env(opts)
@@ -60,10 +60,7 @@ defmodule Exmdb.Env do
   end
 
   def close(%Exmdb.Env{res: res}) do
-    case :elmdb.env_close(res) do
-      :ok         -> :ok
-      {:error, e} -> mdb_error(e)
-    end
+    :elmdb.env_close(res)
   end
 
   defp exists?(path, opts) do
