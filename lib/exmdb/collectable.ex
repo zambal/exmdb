@@ -6,6 +6,7 @@ defmodule Exmdb.Collectable do
   @type t :: %Exmdb.Collectable{
     src: Exmdb.source,
     db_spec: Exmdb.Env.db_spec,
+    timeout: non_neg_integer
   }
 
   def new(env_or_txn, opts) do
