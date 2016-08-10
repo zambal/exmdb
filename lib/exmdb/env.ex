@@ -1,4 +1,6 @@
 defmodule Exmdb.Env do
+  import Exmdb.Util
+
   defstruct res: nil, path: nil, dbs: nil, opts: []
 
   @type db_name :: String.t
@@ -59,10 +61,8 @@ defmodule Exmdb.Env do
 
   def close(%Exmdb.Env{res: res}) do
     case :elmdb.env_close(res) do
-      :ok ->
-        :ok
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      :ok         -> :ok
+      {:error, e} -> mdb_error(e)
     end
   end
 
@@ -87,8 +87,8 @@ defmodule Exmdb.Env do
         # drop create opts
         opts = Keyword.drop(opts, [:dbs, :force])
         %Exmdb.Env{res: res, path: path, opts: opts}
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      {:error, e} ->
+        mdb_error(e)
     end
   end
 
@@ -157,10 +157,8 @@ defmodule Exmdb.Env do
   defp open_db(env_res, name, config, create) do
     opts = build_db_opts(config, create)
     case :elmdb.db_open(env_res, name, opts) do
-      {:ok, dbi_res} ->
-        dbi_res
-      {:error, {_code, msg}} ->
-        raise List.to_string(msg)
+      {:ok, dbi_res} -> dbi_res
+      {:error, e}    -> mdb_error(e)
     end
   end
 
