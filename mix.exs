@@ -16,6 +16,6 @@ defmodule Exmdb.Mixfile do
   end
 
   defp deps do
-    [{:elmdb, "~> 0.3"}]
+    [{:elmdb, git: "https://github.com/coderdan/elmdb.git"}]
   end
 end
