@@ -39,8 +39,8 @@ defmodule Exmdb do
     end
   end
 
-  def set_comparator(%Txn{type: :rw, res: res, env: env} = txn) do
-    {dbi, _, _} = db_spec(env.dbs, [])
+  def set_comparator(%Txn{type: :rw, res: res, env: env} = txn, opts \\ []) do
+    {dbi, _, _} = db_spec(env.dbs, opts)
     :elmdb.set_comparator(res, dbi)
   end
 

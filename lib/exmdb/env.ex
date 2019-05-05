@@ -74,7 +74,7 @@ defmodule Exmdb.Env do
   end
 
   defp open_env(path, opts) do
-    env_opts = build_env_opts(opts)
+    env_opts = build_env_opts(opts) |> IO.inspect(label: "Env opts")
     result = path
     |> :unicode.characters_to_list()
     |> :elmdb.env_open(env_opts)
@@ -108,6 +108,12 @@ defmodule Exmdb.Env do
       env_opts
     else
       [:no_meta_sync | env_opts]
+    end
+
+    env_opts = if Keyword.get(opts, :mem_init, true) do
+      env_opts
+    else
+      [:no_mem_init | env_opts]
     end
 
     env_opts = if sync = Keyword.get(opts, :sync, true) do

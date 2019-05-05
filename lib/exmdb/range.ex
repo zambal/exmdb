@@ -54,6 +54,57 @@ defmodule Exmdb.Range do
   defp direction(_from, :first), do: :bwd
   defp direction(from, to) when from <= to, do: :fwd
   defp direction(_from, _to), do: :bwd
+
+  ## vvvvvv DD Spike vvvvvv
+  # TODO: Move all of this into a Cursor module
+
+  alias Exmdb.{Env, Range, Txn}
+
+  def ensure_txn(%Range{src: %Env{res: env_res} = env} = range) do
+    case :elmdb.ro_txn_begin(env_res) do
+      {:ok, txn_res} ->
+        txn = %Txn{res: txn_res, env: env, type: :ro}
+        {:ok, %Range{range|src: txn, is_src_owner: true}}
+      error ->
+        error
+    end
+  end
+  def ensure_txn(%Range{src: %Txn{}} = range) do
+    {:ok, range}
+  end
+
+  def cursor_open(%Range{src: %Txn{res: txn_res, type: txn_type}, db_spec: db_spec}) do
+    {dbi, _key_type, _val_type} = db_spec
+    case txn_type do
+      :ro -> :elmdb.ro_txn_cursor_open(txn_res, dbi)
+      :rw -> :elmdb.txn_cursor_open(txn_res, dbi)
+    end
+  end
+
+  def close(%Range{is_src_owner: true, src: %Txn{res: res, type: :ro}}, cur) do
+    _ = :elmdb.ro_txn_abort(res)
+    :elmdb.ro_txn_cursor_close(cur)
+  end
+  def close(%Range{is_src_owner: true, src: %Txn{res: res, type: :rw}}, _cur) do
+    case :elmdb.txn_commit(res) do
+      :ok         -> :ok
+      {:error, e} -> mdb_error(e)
+    end
+  end
+  def close(%Range{is_src_owner: false, src: %Txn{type: :ro}}, cur) do
+    :elmdb.ro_txn_cursor_close(cur)
+  end
+  def close(%Range{is_src_owner: false, src: %Txn{type: :rw}}, _cur) do
+    :ok
+  end
+
+  # TODO: Really this should return a tuple of the value and the cursor so that
+  # can at least pretend we are immutable
+  def cursor_get(cur, op, :ro), do: :elmdb.ro_txn_cursor_get(cur, op)
+  def cursor_get(cur, op, :rw), do: :elmdb.txn_cursor_get(cur, op)
+
+  def binkey_in_range?(binkey, :next, to), do: to == :last or binkey <= to
+  def binkey_in_range?(binkey, :prev, to), do: to == :first or binkey >= to
 end
 
 defimpl Enumerable, for: Exmdb.Range do
