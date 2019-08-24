@@ -74,7 +74,7 @@ defmodule Exmdb.Env do
   end
 
   defp open_env(path, opts) do
-    env_opts = build_env_opts(opts) |> IO.inspect(label: "Env opts")
+    env_opts = build_env_opts(opts)
     result = path
     |> :unicode.characters_to_list()
     |> :elmdb.env_open(env_opts)
