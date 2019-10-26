@@ -4,12 +4,13 @@ defmodule Exmdb.Util do
   def db_spec(dbs, opts) do
     case Keyword.get(opts, :db) do
       nil ->
-        if is_map(dbs), do: raise "db name required"
+        if is_map(dbs), do: raise("db name required")
         dbs
+
       name ->
         if is_map(dbs) do
           db_spec = Map.get(dbs, name)
-          if is_nil(db_spec), do: raise "named database #{inspect name} could not be found"
+          if is_nil(db_spec), do: raise("named database #{inspect(name)} could not be found")
           db_spec
         else
           raise "named databases not supported"
