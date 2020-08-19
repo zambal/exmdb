@@ -110,6 +110,12 @@ defmodule Exmdb.Env do
       [:no_meta_sync | env_opts]
     end
 
+    env_opts = if Keyword.get(opts, :mem_init, true) do
+      env_opts
+    else
+      [:no_mem_init | env_opts]
+    end
+
     env_opts = if sync = Keyword.get(opts, :sync, true) do
       if sync == :async do
         [:map_async | env_opts]

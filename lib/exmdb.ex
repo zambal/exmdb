@@ -31,6 +31,19 @@ defmodule Exmdb do
     end
   end
 
+  def delete(%Env{dbs: dbs} = env, key, opts \\ []) do
+    {dbi, key_type, val_type} = db_spec(dbs, opts)
+    case :elmdb.async_delete(dbi, encode(key, key_type), timeout(opts)) do
+      :ok         -> env
+      {:error, e} -> mdb_error(e)
+    end
+  end
+
+  def set_comparator(%Txn{type: :rw, res: res, env: env} = txn, opts \\ []) do
+    {dbi, _, _} = db_spec(env.dbs, opts)
+    :elmdb.set_comparator(res, dbi)
+  end
+
   @spec get(source, any, any, query_opts) :: any
   def get(env_or_txn, key, default \\ nil, opts \\ [])
   def get(%Env{dbs: dbs}, key, default, opts) do
